@@ -50,7 +50,7 @@ if (args.Length == 5)
 
 try
 {
-    using Bitmap bitmap = new Bitmap(imageFile);
+    using var bitmap = new Bitmap(imageFile);
     
     var columns = bitmap.Width / glyphWidth;
     var rows = bitmap.Height / glyphHeight;
@@ -72,7 +72,7 @@ try
 
     var outputFile = Path.ChangeExtension(imageFile, ".txt");
     
-    using StreamWriter writer = new StreamWriter(outputFile, false, Encoding.UTF8);
+    using var writer = new StreamWriter(outputFile, false, Encoding.UTF8);
     
     writer.WriteLine("convfont");
     writer.WriteLine($"Height: {glyphHeight}");
