@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "BmpToConvfnt": {
+      "commandName": "Project",
+      "commandLineArgs": "C:\\code\\ScreenSaver-CE\\animations\\src\\fonts\\matrix_sheet.png -w 16 -h 16 -s 0 -n 135"
+    }
+  }
+}

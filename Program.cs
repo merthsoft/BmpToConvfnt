@@ -1,145 +1,363 @@
-﻿using System.Drawing;
+using System.CommandLine;
+using System.CommandLine.Help;
+using System.Collections.Generic;
+using System.Drawing;
 using System.Text;
 
-if (args.Length < 4 || args.Length > 5)
+var imageFileArgument = new Argument<FileInfo>("imagefile")
 {
-    Console.WriteLine("Usage: bmptoconvfnt imagefile width height startcodepoint [numglyphs]");
-    Console.WriteLine("  imagefile       - Path to the BMP image file");
-    Console.WriteLine("  width          - Width of each glyph in pixels");
-    Console.WriteLine("  height         - Height of each glyph in pixels");
-    Console.WriteLine("  startcodepoint - Starting code point (e.g., 32 for space, 65 for 'A')");
-    Console.WriteLine("  numglyphs      - (Optional) Number of glyphs to read from the image");
-    return 1;
-}
+    Description = "Path to the BMP image file"
+};
 
-var imageFile = args[0];
-if (!File.Exists(imageFile))
+var widthOption = new Option<int>("-w", "--width")
 {
-    Console.WriteLine($"Error: Image file '{imageFile}' not found.");
-    return 1;
-}
+    Description = "Width of each glyph in pixels",
+    Required = true
+};
 
-if (!int.TryParse(args[1], out var glyphWidth) || glyphWidth <= 0)
+var heightOption = new Option<int>("-h", "--height")
 {
-    Console.WriteLine("Error: Width must be a positive integer.");
-    return 1;
-}
+    Description = "Height of each glyph in pixels",
+    Required = true
+};
 
-if (!int.TryParse(args[2], out var glyphHeight) || glyphHeight <= 0)
+var startCodePointOption = new Option<int?>("-s", "--startcodepoint")
 {
-    Console.WriteLine("Error: Height must be a positive integer.");
-    return 1;
-}
+    Description = "Starting code point (e.g., 32 for space, 65 for 'A'; defaults to 0)",
+    DefaultValueFactory = _ => null
+};
 
-if (!int.TryParse(args[3], out var startCodePoint) || startCodePoint < 0)
+var numGlyphsOption = new Option<int?>("-n", "--numglyphs")
 {
-    Console.WriteLine("Error: Start code point must be a non-negative integer.");
-    return 1;
-}
+    Description = "Number of glyphs to read from the image (optional, defaults to all)"
+};
 
-int? maxGlyphs = null;
-if (args.Length == 5)
+var xPadOption = new Option<int>("--xpad")
 {
-    if (!int.TryParse(args[4], out var numGlyphs) || numGlyphs <= 0)
+    Description = "Left padding, in pixels, before the glyph grid starts",
+    DefaultValueFactory = _ => 0
+};
+
+var yPadOption = new Option<int>("--ypad")
+{
+    Description = "Top padding, in pixels, before the glyph grid starts",
+    DefaultValueFactory = _ => 0
+};
+
+var xCellPadOption = new Option<int>("--xcellpad")
+{
+    Description = "Horizontal spacing, in pixels, between glyph cells",
+    DefaultValueFactory = _ => 0
+};
+
+var yCellPadOption = new Option<int>("--ycellpad")
+{
+    Description = "Vertical spacing, in pixels, between glyph cells",
+    DefaultValueFactory = _ => 0
+};
+
+var outputFileOption = new Option<string>("-o", "--output")
+{
+    Description = "Output file path (optional, defaults to input filename with .txt extension)"
+};
+
+var charsFileOption = new Option<string>("-c", "--charsfile")
+{
+    Description = "Path to a text file containing characters to map to glyphs (optional)"
+};
+
+var rootCommand = new RootCommand("Converts a BMP image to convfont format")
+{
+    imageFileArgument,
+    widthOption,
+    heightOption,
+    startCodePointOption,
+    numGlyphsOption,
+    xPadOption,
+    yPadOption,
+    xCellPadOption,
+    yCellPadOption,
+    outputFileOption,
+    charsFileOption
+};
+
+var helpOption = rootCommand.Options
+    .OfType<HelpOption>()
+    .Single();
+
+helpOption.Aliases.Clear();
+helpOption.Aliases.Add("--help");
+helpOption.Aliases.Add("-help");
+helpOption.Aliases.Add("/?");
+
+rootCommand.SetAction((parseResult) =>
+{
+    var imageFile = parseResult.GetValue(imageFileArgument)!;
+    var glyphWidth = parseResult.GetValue(widthOption);
+    var glyphHeight = parseResult.GetValue(heightOption);
+    var startCodePoint = parseResult.GetValue(startCodePointOption);
+    var maxGlyphs = parseResult.GetValue(numGlyphsOption);
+    var xPad = parseResult.GetValue(xPadOption);
+    var yPad = parseResult.GetValue(yPadOption);
+    var xCellPad = parseResult.GetValue(xCellPadOption);
+    var yCellPad = parseResult.GetValue(yCellPadOption);
+    var outputFile = parseResult.GetValue(outputFileOption);
+    var charsFile = parseResult.GetValue(charsFileOption);
+
+    return ProcessImage(
+        imageFile,
+        glyphWidth,
+        glyphHeight,
+        startCodePoint,
+        maxGlyphs,
+        xPad,
+        yPad,
+        xCellPad,
+        yCellPad,
+        outputFile,
+        charsFile);
+});
+
+return await rootCommand.Parse(args).InvokeAsync();
+
+static int ProcessImage(
+    FileInfo imageFile,
+    int glyphWidth,
+    int glyphHeight,
+    int? startCodePoint,
+    int? maxGlyphs,
+    int xPad,
+    int yPad,
+    int xCellPad,
+    int yCellPad,
+    string? outputFile,
+    string? charsFile)
+{
+    if (!imageFile.Exists)
+    {
+        Console.WriteLine($"Error: Image file '{imageFile.FullName}' not found.");
+        return 1;
+    }
+
+    if (glyphWidth <= 0)
+    {
+        Console.WriteLine("Error: Width must be a positive integer.");
+        return 1;
+    }
+
+    if (glyphHeight <= 0)
+    {
+        Console.WriteLine("Error: Height must be a positive integer.");
+        return 1;
+    }
+
+    if (xPad < 0 || yPad < 0)
+    {
+        Console.WriteLine("Error: Padding values must be non-negative integers.");
+        return 1;
+    }
+
+    if (xCellPad < 0 || yCellPad < 0)
+    {
+        Console.WriteLine("Error: Cell padding values must be non-negative integers.");
+        return 1;
+    }
+
+    var usingCharsFile = !string.IsNullOrWhiteSpace(charsFile);
+
+    if (usingCharsFile && startCodePoint.HasValue)
+    {
+        Console.WriteLine("Error: --startcodepoint cannot be used with --charsfile.");
+        return 1;
+    }
+
+    if (usingCharsFile && maxGlyphs.HasValue)
+    {
+        Console.WriteLine("Error: --numglyphs cannot be used with --charsfile.");
+        return 1;
+    }
+
+    var resolvedStartCodePoint = startCodePoint ?? 0;
+
+    if (!usingCharsFile && resolvedStartCodePoint < 0)
+    {
+        Console.WriteLine("Error: Start code point must be a non-negative integer.");
+        return 1;
+    }
+
+    if (!usingCharsFile && maxGlyphs.HasValue && maxGlyphs.Value <= 0)
     {
         Console.WriteLine("Error: Number of glyphs must be a positive integer.");
         return 1;
     }
-    maxGlyphs = numGlyphs;
-}
 
-try
-{
-    using var bitmap = new Bitmap(imageFile);
-    
-    var columns = bitmap.Width / glyphWidth;
-    var rows = bitmap.Height / glyphHeight;
-    var totalGlyphs = columns * rows;
+    List<string>? charRows = null;
+    var definedGlyphs = 0;
 
-    if (columns == 0 || rows == 0)
+    if (usingCharsFile)
     {
-        Console.WriteLine($"Error: Image dimensions ({bitmap.Width}x{bitmap.Height}) are smaller than glyph dimensions ({glyphWidth}x{glyphHeight}).");
-        return 1;
-    }
-
-    var glyphsToProcess = maxGlyphs.HasValue ? Math.Min(maxGlyphs.Value, totalGlyphs) : totalGlyphs;
-
-    Console.WriteLine($"Processing {bitmap.Width}x{bitmap.Height} image into {glyphsToProcess} glyphs ({columns} columns x {rows} rows)");
-    if (maxGlyphs.HasValue && maxGlyphs.Value < totalGlyphs)
-    {
-        Console.WriteLine($"Note: Limiting to {glyphsToProcess} glyphs (image contains {totalGlyphs} total)");
-    }
-
-    var outputFile = Path.ChangeExtension(imageFile, ".txt");
-    
-    using var writer = new StreamWriter(outputFile, false, Encoding.UTF8);
-    
-    writer.WriteLine("convfont");
-    writer.WriteLine($"Height: {glyphHeight}");
-    writer.WriteLine($"Fixed width: {glyphWidth}");
-    writer.WriteLine("Font data:");
-    writer.WriteLine();
-
-    var codePoint = startCodePoint;
-    var firstGlyph = true;
-    var glyphsProcessed = 0;
-
-    for (var row = 0; row < rows && glyphsProcessed < glyphsToProcess; row++)
-    {
-        for (var col = 0; col < columns && glyphsProcessed < glyphsToProcess; col++)
+        if (!File.Exists(charsFile))
         {
-            if (!firstGlyph)
-                writer.WriteLine();
+            Console.WriteLine($"Error: Chars file '{charsFile}' not found.");
+            return 1;
+        }
 
-            firstGlyph = false;
+        charRows = [.. File.ReadLines(charsFile)];
+        definedGlyphs = charRows.Sum(line => line.Length);
 
-            if (codePoint == startCodePoint)
-            {
-                if (codePoint >= 32 && codePoint <= 126)
-                    writer.WriteLine($"Code point: '{(char)codePoint}'");
-                else
-                    writer.WriteLine($"Code point: {codePoint}");
-            }
-            
-            writer.WriteLine("Data:");
-
-            var startX = col * glyphWidth;
-            var startY = row * glyphHeight;
-
-            for (var y = 0; y < glyphHeight; y++)
-            {
-                var line = new StringBuilder();
-                
-                for (var x = 0; x < glyphWidth; x++)
-                {
-                    var pixelX = startX + x;
-                    var pixelY = startY + y;
-
-                    if (pixelX < bitmap.Width && pixelY < bitmap.Height)
-                    {
-                        var pixel = bitmap.GetPixel(pixelX, pixelY);
-                        var set = pixel.A > 128 && (pixel.R + pixel.G + pixel.B) / 3 < 128;
-                        line.Append(set ? '#' : ' ');
-                    }
-                    else
-                    {
-                        line.Append(' ');
-                    }
-                }
-                
-                writer.WriteLine(line.ToString());
-            }
-
-            codePoint++;
-            glyphsProcessed++;
+        if (definedGlyphs == 0)
+        {
+            Console.WriteLine("Error: Chars file does not define any glyphs.");
+            return 1;
         }
     }
 
-    Console.WriteLine($"Successfully created '{outputFile}' with {glyphsProcessed} glyphs (code points {startCodePoint}-{codePoint - 1})");
-    return 0;
-}
-catch (Exception ex)
-{
-    Console.WriteLine($"Error processing image: {ex.Message}");
-    return 1;
+    try
+    {
+        using var bitmap = new Bitmap(imageFile.FullName);
+
+        var usableWidth = bitmap.Width - xPad;
+        var usableHeight = bitmap.Height - yPad;
+
+        if (usableWidth < glyphWidth || usableHeight < glyphHeight)
+        {
+            Console.WriteLine($"Error: Image dimensions ({bitmap.Width}x{bitmap.Height}) minus padding ({xPad}x{yPad}) are smaller than glyph dimensions ({glyphWidth}x{glyphHeight}).");
+            return 1;
+        }
+
+        var columns = 1 + (usableWidth - glyphWidth) / (glyphWidth + xCellPad);
+        var rows = 1 + (usableHeight - glyphHeight) / (glyphHeight + yCellPad);
+        var totalGlyphs = columns * rows;
+
+        if (columns == 0 || rows == 0)
+        {
+            Console.WriteLine($"Error: Image dimensions ({bitmap.Width}x{bitmap.Height}) are smaller than glyph dimensions ({glyphWidth}x{glyphHeight}) once padding is applied.");
+            return 1;
+        }
+
+        var glyphLimit = totalGlyphs;
+
+        if (usingCharsFile)
+        {
+            glyphLimit = Math.Min(totalGlyphs, definedGlyphs);
+            Console.WriteLine($"Processing {bitmap.Width}x{bitmap.Height} image using up to {glyphLimit} glyphs defined in '{charsFile}'.");
+            if (definedGlyphs > glyphLimit)
+            {
+                Console.WriteLine($"Note: Character file defines {definedGlyphs} glyphs but only {glyphLimit} fit within the image grid.");
+            }
+        }
+        else
+        {
+            var glyphsToProcess = maxGlyphs.HasValue ? Math.Min(maxGlyphs.Value, totalGlyphs) : totalGlyphs;
+            glyphLimit = glyphsToProcess;
+
+            Console.WriteLine($"Processing {bitmap.Width}x{bitmap.Height} image into {glyphsToProcess} glyphs ({columns} columns x {rows} rows)");
+            if (maxGlyphs.HasValue && maxGlyphs.Value < totalGlyphs)
+            {
+                Console.WriteLine($"Note: Limiting to {glyphsToProcess} glyphs (image contains {totalGlyphs} total)");
+            }
+        }
+
+        outputFile = string.IsNullOrWhiteSpace(outputFile)
+                        ? Path.ChangeExtension(imageFile.FullName, ".txt")
+                        : outputFile;
+
+        using var writer = new StreamWriter(outputFile, false, Encoding.UTF8);
+
+        writer.WriteLine("convfont");
+        writer.WriteLine($"Height: {glyphHeight}");
+        writer.WriteLine($"Fixed width: {glyphWidth}");
+        writer.WriteLine("Font data:");
+        writer.WriteLine();
+
+        var codePoint = resolvedStartCodePoint;
+        var lastCodePointWritten = resolvedStartCodePoint - 1;
+        var firstGlyph = true;
+        var glyphsProcessed = 0;
+
+        for (var row = 0; row < rows && glyphsProcessed < glyphLimit; row++)
+        {
+            if (usingCharsFile && (charRows == null || row >= charRows.Count))
+                break;
+
+            var columnsThisRow = usingCharsFile && charRows != null
+                ? Math.Min(columns, charRows[row].Length)
+                : columns;
+
+            for (var col = 0; col < columnsThisRow && glyphsProcessed < glyphLimit; col++)
+            {
+                if (!firstGlyph)
+                    writer.WriteLine();
+
+                firstGlyph = false;
+
+                if (usingCharsFile && charRows != null)
+                {
+                    var glyphChar = charRows[row][col];
+                    if (glyphChar >= 32 && glyphChar <= 126)
+                        writer.WriteLine($"Code point: '{glyphChar}'");
+                    else
+                        writer.WriteLine($"Code point: {(int)glyphChar}");
+                }
+                else
+                {
+                    if (codePoint >= 32 && codePoint <= 126)
+                        writer.WriteLine($"Code point: '{(char)codePoint}'");
+                    else
+                        writer.WriteLine($"Code point: {codePoint}");
+
+                    lastCodePointWritten = codePoint;
+                    codePoint++;
+                }
+
+                writer.WriteLine("Data:");
+
+                var startX = xPad + col * (glyphWidth + xCellPad);
+                var startY = yPad + row * (glyphHeight + yCellPad);
+
+                for (var y = 0; y < glyphHeight; y++)
+                {
+                    var line = new StringBuilder();
+
+                    for (var x = 0; x < glyphWidth; x++)
+                    {
+                        var pixelX = startX + x;
+                        var pixelY = startY + y;
+
+                        if (pixelX < bitmap.Width && pixelY < bitmap.Height)
+                        {
+                            var pixel = bitmap.GetPixel(pixelX, pixelY);
+                            var set = pixel.A > 128 && (pixel.R + pixel.G + pixel.B) / 3 < 128;
+                            line.Append(set ? '#' : ' ');
+                        }
+                        else
+                        {
+                            line.Append(' ');
+                        }
+                    }
+
+                    writer.WriteLine(line.ToString());
+                }
+
+                glyphsProcessed++;
+            }
+        }
+
+        if (usingCharsFile)
+        {
+            Console.WriteLine($"Successfully created '{outputFile}' with {glyphsProcessed} glyphs defined by '{charsFile}'.");
+        }
+        else
+        {
+            var endCodePoint = glyphsProcessed > 0 ? lastCodePointWritten : resolvedStartCodePoint - 1;
+            Console.WriteLine($"Successfully created '{outputFile}' with {glyphsProcessed} glyphs (code points {resolvedStartCodePoint}-{endCodePoint})");
+        }
+
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error processing image: {ex.Message}");
+        return 1;
+    }
 }
