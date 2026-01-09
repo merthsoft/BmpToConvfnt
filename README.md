@@ -1,6 +1,6 @@
 ﻿# BmpToConvfnt
 
-Creates a Convfnt ASCII file from an image file.
+Creates a [Convfnt](https://github.com/drdnar/convfont/) ASCII file from an image file.
 
 ## Usage
 
